@@ -46,6 +46,40 @@ final class DiscoverViewModelTests: XCTestCase {
         XCTAssertEqual(message, LocationError.permissionDenied.errorDescription)
     }
 
+    func test_search_buildsChipsFromResultCategories() async {
+        let sut = makeSUT(
+            location: CLLocation(latitude: 51.5, longitude: -0.12),
+            results: [
+                .stub(name: "A", latitude: 51.5, longitude: -0.12, category: "Restaurant"),
+                .stub(name: "B", latitude: 51.5001, longitude: -0.12, category: "Café"),
+                .stub(name: "C", latitude: 51.5002, longitude: -0.12, category: "Restaurant"),
+            ]
+        )
+
+        _ = await loadedRows(from: sut) { sut.search(query: "") }
+
+        XCTAssertEqual(sut.chips.map(\.title), ["All", "Café", "Restaurant"])
+        XCTAssertEqual(sut.selectedChipTitle, "All")
+    }
+
+    func test_selectChip_filtersRowsToThatCategory() async {
+        let sut = makeSUT(
+            location: CLLocation(latitude: 51.5, longitude: -0.12),
+            results: [
+                .stub(name: "Dishoom", latitude: 51.5, longitude: -0.12, category: "Restaurant"),
+                .stub(name: "Monmouth", latitude: 51.5001, longitude: -0.12, category: "Café"),
+            ]
+        )
+        _ = await loadedRows(from: sut) { sut.search(query: "") }
+
+        sut.selectChip(title: "Café")
+
+        guard case .loaded(let rows) = sut.state else {
+            return XCTFail("expected loaded state")
+        }
+        XCTAssertEqual(rows.map(\.restaurant.name), ["Monmouth"])
+    }
+
     func test_toggleFavourite_updatesRowFlag() async {
         let restaurant = Restaurant.stub(name: "Bao", latitude: 51.5, longitude: -0.12)
         let sut = makeSUT(location: CLLocation(latitude: 51.5, longitude: -0.12), results: [restaurant])
@@ -131,11 +165,16 @@ private struct FakeSearchService: RestaurantSearching {
 }
 
 private extension Restaurant {
-    static func stub(name: String, latitude: Double, longitude: Double) -> Restaurant {
+    static func stub(
+        name: String,
+        latitude: Double,
+        longitude: Double,
+        category: String = "Restaurant"
+    ) -> Restaurant {
         Restaurant(
             id: "stub-\(name)",
             name: name,
-            category: "Restaurant",
+            category: category,
             latitude: latitude,
             longitude: longitude,
             street: nil,

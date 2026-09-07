@@ -1,17 +1,21 @@
 import UIKit
 
-/// The Discover tab. Shows a searchable, distance-sorted list of nearby restaurants.
+/// The Discover tab: a searchable, distance-sorted list of nearby restaurants
+/// with a horizontal category filter bar.
 final class DiscoverViewController: UIViewController {
+
+    private enum ListSection { case main }
 
     private let viewModel: DiscoverViewModel
 
+    private lazy var chipsView = makeChipsView()
     private lazy var tableView = makeTableView()
-    private let searchController = UISearchController(searchResultsController: nil)
-    private let statusLabel = UILabel()
-    private let activityIndicator = UIActivityIndicatorView(style: .large)
+    private lazy var listDataSource = makeListDataSource()
+    private var rowsByID: [Restaurant.ID: DiscoverViewModel.RestaurantRow] = [:]
 
-    private var rows: [DiscoverViewModel.RestaurantRow] = []
+    private let searchController = UISearchController(searchResultsController: nil)
     private var searchDebounce: DispatchWorkItem?
+    private var chipsHeight: NSLayoutConstraint!
 
     init(environment: AppEnvironment) {
         self.viewModel = DiscoverViewModel(environment: environment)
@@ -24,15 +28,13 @@ final class DiscoverViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Discover"
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .systemGroupedBackground
 
         configureSearch()
         configureLayout()
 
-        viewModel.onStateChange = { [weak self] state in
-            // DiscoverViewModel is @MainActor, so this always arrives on the main thread.
-            self?.render(state)
-        }
+        viewModel.onStateChange = { [weak self] state in self?.render(state) }
+        viewModel.onChipsChange = { [weak self] in self?.renderChips() }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -42,18 +44,60 @@ final class DiscoverViewController: UIViewController {
 
     // MARK: - Setup
 
+    private func makeChipsView() -> UICollectionView {
+        let layout = UICollectionViewCompositionalLayout { _, _ in
+            let item = NSCollectionLayoutItem(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .estimated(72), heightDimension: .fractionalHeight(1))
+            )
+            let group = NSCollectionLayoutGroup.horizontal(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .estimated(72), heightDimension: .absolute(34)),
+                subitems: [item]
+            )
+            let section = NSCollectionLayoutSection(group: group)
+            section.interGroupSpacing = 8
+            section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 16, bottom: 8, trailing: 16)
+            section.orthogonalScrollingBehavior = .continuous
+            return section
+        }
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.backgroundColor = .clear
+        collectionView.showsHorizontalScrollIndicator = false
+        collectionView.register(CategoryChipCell.self, forCellWithReuseIdentifier: CategoryChipCell.reuseID)
+        collectionView.dataSource = self
+        collectionView.delegate = self
+        return collectionView
+    }
+
     private func makeTableView() -> UITableView {
         let table = UITableView(frame: .zero, style: .plain)
         table.translatesAutoresizingMaskIntoConstraints = false
+        table.backgroundColor = .clear
+        table.separatorStyle = .none
         table.rowHeight = UITableView.automaticDimension
-        table.estimatedRowHeight = 72
+        table.estimatedRowHeight = 96
         table.keyboardDismissMode = .onDrag
+        table.contentInset.top = 4
         table.register(RestaurantCell.self, forCellReuseIdentifier: RestaurantCell.reuseID)
-        table.dataSource = self
         table.delegate = self
         table.refreshControl = UIRefreshControl()
         table.refreshControl?.addTarget(self, action: #selector(handleRefresh), for: .valueChanged)
         return table
+    }
+
+    private func makeListDataSource() -> UITableViewDiffableDataSource<ListSection, Restaurant> {
+        UITableViewDiffableDataSource(tableView: tableView) { [weak self] tableView, indexPath, restaurant in
+            let cell = tableView.dequeueReusableCell(withIdentifier: RestaurantCell.reuseID, for: indexPath)
+            guard let self,
+                  let restaurantCell = cell as? RestaurantCell,
+                  let row = self.rowsByID[restaurant.id] else { return cell }
+
+            restaurantCell.configure(with: row)
+            restaurantCell.onToggleFavourite = { [weak self] in
+                self?.viewModel.toggleFavourite(for: restaurant)
+            }
+            return restaurantCell
+        }
     }
 
     private func configureSearch() {
@@ -66,35 +110,24 @@ final class DiscoverViewController: UIViewController {
     }
 
     private func configureLayout() {
+        view.addSubview(chipsView)
         view.addSubview(tableView)
-        view.addSubview(statusLabel)
-        view.addSubview(activityIndicator)
 
-        statusLabel.translatesAutoresizingMaskIntoConstraints = false
-        statusLabel.numberOfLines = 0
-        statusLabel.textAlignment = .center
-        statusLabel.textColor = .secondaryLabel
-        statusLabel.font = .preferredFont(forTextStyle: .body)
-        statusLabel.adjustsFontForContentSizeCategory = true
-        statusLabel.isHidden = true
-
-        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
-        activityIndicator.hidesWhenStopped = true
+        chipsHeight = chipsView.heightAnchor.constraint(equalToConstant: 0)
 
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
+            chipsView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            chipsView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            chipsView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            chipsHeight,
+
+            tableView.topAnchor.constraint(equalTo: chipsView.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            statusLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            statusLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            statusLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
-            statusLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
-
-            activityIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            activityIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor),
         ])
+
+        _ = listDataSource // create the diffable data source (it wires itself to the table)
     }
 
     // MARK: - Rendering
@@ -105,24 +138,61 @@ final class DiscoverViewController: UIViewController {
             break
 
         case .loading:
-            statusLabel.isHidden = true
-            if rows.isEmpty { activityIndicator.startAnimating() }
+            if listDataSource.snapshot().numberOfItems == 0 {
+                contentUnavailableConfiguration = UIContentUnavailableConfiguration.loading()
+            }
 
-        case .loaded(let newRows):
-            activityIndicator.stopAnimating()
+        case .loaded(let rows):
             tableView.refreshControl?.endRefreshing()
-            statusLabel.isHidden = true
-            rows = newRows
-            tableView.reloadData()
+            contentUnavailableConfiguration = nil
+            apply(rows: rows)
 
-        case .empty(let message), .failed(let message):
-            activityIndicator.stopAnimating()
+        case .empty(let message):
             tableView.refreshControl?.endRefreshing()
-            rows = []
-            tableView.reloadData()
-            statusLabel.text = message
-            statusLabel.isHidden = false
+            apply(rows: [])
+            var config = UIContentUnavailableConfiguration.empty()
+            config.image = UIImage(systemName: "fork.knife")
+            config.text = "No restaurants"
+            config.secondaryText = message
+            contentUnavailableConfiguration = config
+
+        case .failed(let message):
+            tableView.refreshControl?.endRefreshing()
+            apply(rows: [])
+            var config = UIContentUnavailableConfiguration.empty()
+            config.image = UIImage(systemName: "exclamationmark.triangle")
+            config.text = "Couldn’t load restaurants"
+            config.secondaryText = message
+            var button = UIButton.Configuration.borderedProminent()
+            button.title = "Try Again"
+            config.button = button
+            config.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.viewModel.retry() }
+            contentUnavailableConfiguration = config
         }
+    }
+
+    private func apply(rows: [DiscoverViewModel.RestaurantRow]) {
+        rowsByID = Dictionary(rows.map { ($0.restaurant.id, $0) }, uniquingKeysWith: { first, _ in first })
+
+        let existing = Set(listDataSource.snapshot().itemIdentifiers)
+        var snapshot = NSDiffableDataSourceSnapshot<ListSection, Restaurant>()
+        snapshot.appendSections([.main])
+        let items = rows.map(\.restaurant)
+        snapshot.appendItems(items)
+
+        // Re-render rows whose identity is unchanged but whose content (favourite
+        // state, distance) may have — without the scroll jump a full reload causes.
+        let unchanged = items.filter { existing.contains($0) }
+        if !unchanged.isEmpty {
+            snapshot.reconfigureItems(unchanged)
+        }
+        listDataSource.apply(snapshot, animatingDifferences: !existing.isEmpty)
+    }
+
+    private func renderChips() {
+        chipsView.reloadData()
+        chipsHeight.constant = viewModel.chips.count > 1 ? 50 : 0
+        UIView.animate(withDuration: 0.2) { self.view.layoutIfNeeded() }
     }
 
     // MARK: - Actions
@@ -132,29 +202,37 @@ final class DiscoverViewController: UIViewController {
     }
 }
 
-// MARK: - UITableViewDataSource / Delegate
+// MARK: - Category chips
 
-extension DiscoverViewController: UITableViewDataSource, UITableViewDelegate {
+extension DiscoverViewController: UICollectionViewDataSource, UICollectionViewDelegate {
 
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        rows.count
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        viewModel.chips.count
     }
 
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: RestaurantCell.reuseID, for: indexPath)
-        guard let restaurantCell = cell as? RestaurantCell else { return cell }
-
-        let row = rows[indexPath.row]
-        restaurantCell.configure(with: row)
-        restaurantCell.onToggleFavourite = { [weak self] in
-            self?.viewModel.toggleFavourite(for: row.restaurant)
-        }
-        return restaurantCell
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: CategoryChipCell.reuseID, for: indexPath)
+        let chip = viewModel.chips[indexPath.item]
+        (cell as? CategoryChipCell)?.configure(title: chip.title, selected: chip.title == viewModel.selectedChipTitle)
+        return cell
     }
+
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        let chip = viewModel.chips[indexPath.item]
+        UISelectionFeedbackGenerator().selectionChanged()
+        viewModel.selectChip(title: chip.title)
+        collectionView.reloadData()
+        collectionView.scrollToItem(at: indexPath, at: .centeredHorizontally, animated: true)
+    }
+}
+
+// MARK: - Table selection
+
+extension DiscoverViewController: UITableViewDelegate {
 
     func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        let restaurant = rows[indexPath.row].restaurant
+        guard let restaurant = listDataSource.itemIdentifier(for: indexPath) else { return }
         let detail = RestaurantDetailViewController(
             restaurant: restaurant,
             favourites: viewModel.favouritesRepository
@@ -163,7 +241,7 @@ extension DiscoverViewController: UITableViewDataSource, UITableViewDelegate {
     }
 }
 
-// MARK: - UISearchResultsUpdating
+// MARK: - Search
 
 extension DiscoverViewController: UISearchResultsUpdating {
 
@@ -171,9 +249,7 @@ extension DiscoverViewController: UISearchResultsUpdating {
         // Debounce so we don't fire a MapKit request on every keystroke.
         searchDebounce?.cancel()
         let query = searchController.searchBar.text ?? ""
-        let work = DispatchWorkItem { [weak self] in
-            self?.viewModel.search(query: query)
-        }
+        let work = DispatchWorkItem { [weak self] in self?.viewModel.search(query: query) }
         searchDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
     }
