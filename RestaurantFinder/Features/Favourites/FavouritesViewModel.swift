@@ -29,9 +29,8 @@ final class FavouritesViewModel {
         onChange?()
     }
 
-    func removeRestaurant(at index: Int) {
-        guard restaurants.indices.contains(index) else { return }
-        favouritesRepository.remove(restaurants[index])
+    func remove(_ restaurant: Restaurant) {
+        favouritesRepository.remove(restaurant)
         reload()
     }
 }

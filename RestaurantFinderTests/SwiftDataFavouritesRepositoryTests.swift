@@ -1,22 +1,24 @@
+import SwiftData
 import XCTest
 @testable import RestaurantFinder
 
-final class FileFavouritesRepositoryTests: XCTestCase {
+final class SwiftDataFavouritesRepositoryTests: XCTestCase {
 
-    private var fileURL: URL!
-    private var sut: FileFavouritesRepository!
+    private var container: ModelContainer!
+    private var sut: SwiftDataFavouritesRepository!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        fileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("favourites-\(UUID().uuidString).json")
-        sut = FileFavouritesRepository(fileURL: fileURL)
+        container = try ModelContainer(
+            for: FavouriteRestaurant.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
+        sut = SwiftDataFavouritesRepository(container: container)
     }
 
     override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: fileURL)
         sut = nil
-        fileURL = nil
+        container = nil
         try super.tearDownWithError()
     }
 
@@ -32,12 +34,12 @@ final class FileFavouritesRepositoryTests: XCTestCase {
         XCTAssertTrue(sut.favourites().isEmpty)
     }
 
-    func test_favourites_persistAcrossInstances() {
+    func test_favourites_persistInTheStoreAcrossContexts() {
         sut.toggle(.stub(name: "Brat"))
 
-        let reloaded = FileFavouritesRepository(fileURL: fileURL)
+        let another = SwiftDataFavouritesRepository(container: container)
 
-        XCTAssertEqual(reloaded.favourites().map(\.name), ["Brat"])
+        XCTAssertEqual(another.favourites().map(\.name), ["Brat"])
     }
 
     func test_remove_isNoOpForUnknownRestaurant() {
@@ -48,11 +50,20 @@ final class FileFavouritesRepositoryTests: XCTestCase {
         XCTAssertEqual(sut.favourites().count, 1)
     }
 
-    func test_mostRecentlyToggledRestaurantComesFirst() {
+    func test_favourites_areReturnedMostRecentFirst() {
         sut.toggle(.stub(name: "First"))
         sut.toggle(.stub(name: "Second"))
 
         XCTAssertEqual(sut.favourites().map(\.name), ["Second", "First"])
+    }
+
+    func test_toggle_twiceForSameRestaurantDoesNotDuplicate() {
+        let restaurant = Restaurant.stub(name: "Brat")
+        sut.toggle(restaurant)
+        sut.toggle(restaurant) // remove
+        sut.toggle(restaurant) // add again
+
+        XCTAssertEqual(sut.favourites().count, 1)
     }
 }
 

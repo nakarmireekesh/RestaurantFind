@@ -1,11 +1,14 @@
 import UIKit
 
-/// The Favourites tab: a simple editable list of saved restaurants.
+/// The Favourites tab: a two-column grid of saved restaurants, each shown as a
+/// map thumbnail tile. Long-press a tile to remove it.
 final class FavouritesViewController: UIViewController {
 
+    private enum Section { case main }
+
     private let viewModel: FavouritesViewModel
-    private lazy var tableView = makeTableView()
-    private let emptyLabel = UILabel()
+    private lazy var collectionView = makeCollectionView()
+    private lazy var dataSource = makeDataSource()
 
     init(environment: AppEnvironment) {
         self.viewModel = FavouritesViewModel(environment: environment)
@@ -18,34 +21,18 @@ final class FavouritesViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Favourites"
-        view.backgroundColor = .systemBackground
+        view.backgroundColor = .systemGroupedBackground
 
-        view.addSubview(tableView)
-        view.addSubview(emptyLabel)
-
-        emptyLabel.translatesAutoresizingMaskIntoConstraints = false
-        emptyLabel.text = "Restaurants you favourite will show up here."
-        emptyLabel.textColor = .secondaryLabel
-        emptyLabel.textAlignment = .center
-        emptyLabel.numberOfLines = 0
-        emptyLabel.font = .preferredFont(forTextStyle: .body)
-        emptyLabel.adjustsFontForContentSizeCategory = true
-
+        view.addSubview(collectionView)
         NSLayoutConstraint.activate([
-            tableView.topAnchor.constraint(equalTo: view.topAnchor),
-            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
-
-            emptyLabel.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            emptyLabel.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            emptyLabel.leadingAnchor.constraint(greaterThanOrEqualTo: view.leadingAnchor, constant: 32),
-            emptyLabel.trailingAnchor.constraint(lessThanOrEqualTo: view.trailingAnchor, constant: -32),
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
 
-        viewModel.onChange = { [weak self] in
-            self?.render()
-        }
+        _ = dataSource
+        viewModel.onChange = { [weak self] in self?.render() }
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -55,48 +42,65 @@ final class FavouritesViewController: UIViewController {
 
     // MARK: - Setup
 
-    private func makeTableView() -> UITableView {
-        let table = UITableView(frame: .zero, style: .plain)
-        table.translatesAutoresizingMaskIntoConstraints = false
-        table.rowHeight = UITableView.automaticDimension
-        table.estimatedRowHeight = 64
-        table.register(UITableViewCell.self, forCellReuseIdentifier: "cell")
-        table.dataSource = self
-        table.delegate = self
-        return table
+    private func makeCollectionView() -> UICollectionView {
+        let layout = UICollectionViewCompositionalLayout { _, _ in
+            let item = NSCollectionLayoutItem(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(0.5), heightDimension: .estimated(196))
+            )
+            item.contentInsets = NSDirectionalEdgeInsets(top: 7, leading: 7, bottom: 7, trailing: 7)
+
+            let group = NSCollectionLayoutGroup.horizontal(
+                layoutSize: NSCollectionLayoutSize(widthDimension: .fractionalWidth(1.0), heightDimension: .estimated(196)),
+                subitems: [item, item]
+            )
+            let section = NSCollectionLayoutSection(group: group)
+            section.contentInsets = NSDirectionalEdgeInsets(top: 8, leading: 13, bottom: 28, trailing: 13)
+            return section
+        }
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.backgroundColor = .clear
+        collectionView.alwaysBounceVertical = true
+        collectionView.register(FavouriteTileCell.self, forCellWithReuseIdentifier: FavouriteTileCell.reuseID)
+        collectionView.delegate = self
+        return collectionView
     }
 
+    private func makeDataSource() -> UICollectionViewDiffableDataSource<Section, Restaurant> {
+        UICollectionViewDiffableDataSource(collectionView: collectionView) { collectionView, indexPath, restaurant in
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: FavouriteTileCell.reuseID, for: indexPath)
+            (cell as? FavouriteTileCell)?.configure(with: restaurant)
+            return cell
+        }
+    }
+
+    // MARK: - Rendering
+
     private func render() {
-        emptyLabel.isHidden = !viewModel.isEmpty
-        tableView.reloadData()
+        if viewModel.isEmpty {
+            var config = UIContentUnavailableConfiguration.empty()
+            config.image = UIImage(systemName: "heart")
+            config.text = "No favourites yet"
+            config.secondaryText = "Tap the heart on a restaurant to save it here."
+            contentUnavailableConfiguration = config
+        } else {
+            contentUnavailableConfiguration = nil
+        }
+
+        var snapshot = NSDiffableDataSourceSnapshot<Section, Restaurant>()
+        snapshot.appendSections([.main])
+        snapshot.appendItems(viewModel.restaurants)
+        dataSource.apply(snapshot, animatingDifferences: !dataSource.snapshot().itemIdentifiers.isEmpty)
     }
 }
 
-// MARK: - UITableViewDataSource / Delegate
+// MARK: - UICollectionViewDelegate
 
-extension FavouritesViewController: UITableViewDataSource, UITableViewDelegate {
+extension FavouritesViewController: UICollectionViewDelegate {
 
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        viewModel.restaurants.count
-    }
-
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "cell", for: indexPath)
-        let restaurant = viewModel.restaurants[indexPath.row]
-
-        var config = cell.defaultContentConfiguration()
-        config.text = restaurant.name
-        config.secondaryText = [restaurant.category, restaurant.shortAddress.nilIfEmpty]
-            .compactMap { $0 }
-            .joined(separator: " · ")
-        cell.contentConfiguration = config
-        cell.accessoryType = .disclosureIndicator
-        return cell
-    }
-
-    func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
-        tableView.deselectRow(at: indexPath, animated: true)
-        let restaurant = viewModel.restaurants[indexPath.row]
+    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        collectionView.deselectItem(at: indexPath, animated: true)
+        guard let restaurant = dataSource.itemIdentifier(for: indexPath) else { return }
         let detail = RestaurantDetailViewController(
             restaurant: restaurant,
             favourites: viewModel.favouritesRepository
@@ -104,12 +108,21 @@ extension FavouritesViewController: UITableViewDataSource, UITableViewDelegate {
         navigationController?.pushViewController(detail, animated: true)
     }
 
-    func tableView(
-        _ tableView: UITableView,
-        commit editingStyle: UITableViewCell.EditingStyle,
-        forRowAt indexPath: IndexPath
-    ) {
-        guard editingStyle == .delete else { return }
-        viewModel.removeRestaurant(at: indexPath.row)
+    func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let restaurant = dataSource.itemIdentifier(for: indexPath) else { return nil }
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [weak self] _ in
+            let remove = UIAction(
+                title: "Remove from Favourites",
+                image: UIImage(systemName: "heart.slash"),
+                attributes: .destructive
+            ) { _ in
+                self?.viewModel.remove(restaurant)
+            }
+            return UIMenu(children: [remove])
+        }
     }
 }

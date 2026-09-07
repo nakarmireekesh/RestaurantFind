@@ -1,21 +1,23 @@
 import CoreLocation
+import SwiftData
 import XCTest
 @testable import RestaurantFinder
 
 @MainActor
 final class DiscoverViewModelTests: XCTestCase {
 
-    private var favouritesFileURL: URL!
+    private var container: ModelContainer!
 
     override func setUpWithError() throws {
         try super.setUpWithError()
-        favouritesFileURL = FileManager.default.temporaryDirectory
-            .appendingPathComponent("fav-\(UUID().uuidString).json")
+        container = try ModelContainer(
+            for: FavouriteRestaurant.self,
+            configurations: ModelConfiguration(isStoredInMemoryOnly: true)
+        )
     }
 
     override func tearDownWithError() throws {
-        try? FileManager.default.removeItem(at: favouritesFileURL)
-        favouritesFileURL = nil
+        container = nil
         try super.tearDownWithError()
     }
 
@@ -103,7 +105,7 @@ final class DiscoverViewModelTests: XCTestCase {
         let environment = AppEnvironment(
             locationService: FakeLocationService(location: location, error: locationError),
             searchService: FakeSearchService(results: results),
-            favourites: FileFavouritesRepository(fileURL: favouritesFileURL)
+            favourites: SwiftDataFavouritesRepository(container: container)
         )
         return DiscoverViewModel(environment: environment)
     }
