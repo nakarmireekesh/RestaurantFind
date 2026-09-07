@@ -164,10 +164,30 @@ final class RestaurantDetailViewController: UIViewController {
     }
 
     @objc private func callRestaurant() {
-        guard let phone = viewModel.restaurant.phoneNumber else { return }
-        let digits = phone.filter { $0.isNumber || $0 == "+" }
-        guard let url = URL(string: "tel://\(digits)"), UIApplication.shared.canOpenURL(url) else { return }
-        UIApplication.shared.open(url)
+        guard let phone = viewModel.restaurant.phoneNumber?.nilIfEmpty else { return }
+        let dialable = phone.filter { $0.isNumber || $0 == "+" }
+
+        guard let url = URL(string: "tel:\(dialable)") else {
+            offerToCopyNumber(phone)
+            return
+        }
+        UIApplication.shared.open(url) { [weak self] didOpen in
+            // No dialer (Simulator, iPad without cellular) — fall back to copy.
+            if !didOpen { self?.offerToCopyNumber(phone) }
+        }
+    }
+
+    private func offerToCopyNumber(_ phone: String) {
+        let sheet = UIAlertController(title: phone, message: "This device can't place calls.", preferredStyle: .actionSheet)
+        sheet.addAction(UIAlertAction(title: "Copy Number", style: .default) { _ in
+            UIPasteboard.general.string = phone
+        })
+        sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        if let popover = sheet.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+        }
+        present(sheet, animated: true)
     }
 
     @objc private func openWebsite() {
