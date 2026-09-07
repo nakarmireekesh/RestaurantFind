@@ -6,19 +6,21 @@ services, unit tests, no third-party dependencies.
 
 | Discover | Detail | Favourites |
 | --- | --- | --- |
-| Search + distance-sorted list | Map, address, call, website | Saved list, swipe to delete |
+| Card list + category filter chips, distance-sorted | Map, address, call, website | Map-thumbnail grid, long-press to remove |
 
-> Add screenshots to `Docs/` and update this table once you can run it.
+> Add screenshots to `Docs/` and update this table.
 
 ## What it does
 
 - **Discover tab** — asks for location permission, then lists restaurants within
-  ~4 km, closest first. A search bar filters by free text ("sushi", "coffee",
-  "burger"). Pull to refresh.
+  ~4 km, closest first, as cards with a category icon. A search bar filters by
+  free text ("sushi", "coffee", "burger"); a chip bar filters by category. Pull
+  to refresh.
 - **Detail screen** — an embedded map with a pin, the category, and tappable
   rows: address opens Apple Maps, phone starts a call, website opens Safari.
-- **Favourites tab** — tap the heart anywhere to save a restaurant. Favourites
-  are stored on device as JSON and survive relaunch. Swipe a row to delete.
+- **Favourites tab** — tap the heart anywhere to save a restaurant. Shown as a
+  two-column grid of map-thumbnail tiles; long-press a tile to remove it.
+  Favourites are stored with **SwiftData** and survive relaunch.
 
 ## Tech
 
@@ -28,9 +30,10 @@ services, unit tests, no third-party dependencies.
 | Architecture | MVVM — view controllers are thin, view models are `@MainActor` and hold all logic |
 | Search | Apple **MapKit** `MKLocalSearch` — no API key, no billing account |
 | Location | `CLLocationManager` wrapped in an `async` call |
-| Persistence | `Codable` favourites written to a JSON file in Application Support, behind a `FavouritesRepository` protocol |
+| Persistence | **SwiftData** (`@Model FavouriteRestaurant`) behind a `FavouritesRepository` protocol; one-shot migration from the previous JSON store |
+| Lists | `UITableView` / `UICollectionViewDiffableDataSource`, `UICollectionViewCompositionalLayout` for the chip bar and the favourites grid |
 | Concurrency | `async`/`await`, cancellable search `Task` |
-| Tests | XCTest — repository round-trip + view model behaviour with fakes |
+| Tests | XCTest — SwiftData repository (in-memory store) + view model behaviour with fakes (10 tests) |
 | Dependencies | none |
 
 ## Project layout
