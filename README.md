@@ -60,8 +60,15 @@ reaching for singletons, so view models can be driven by fakes in tests — see
 2. Open `RestaurantFinder.xcodeproj`.
 3. Select an iPhone simulator and press **⌘R**.
 4. To search real results in the simulator, set a location:
-   **Features ▸ Location ▸ Apple** (or Custom Location…). On a device it uses GPS.
+   **Features ▸ Location ▸ Custom Location…**. On a device it uses GPS.
 5. Run tests with **⌘U**.
+
+> **Testing note:** `MKLocalSearch` uses the Maps data backend for your Mac's
+> **Region** (System Settings ▸ General ▸ Language & Region). If your region is
+> set to mainland China, Apple routes through AutoNavi, and searches only return
+> results for coordinates inside China — pick a simulator location to match your
+> region (e.g. a China city, or switch your Mac's region), or you'll see
+> "MKErrorDomain error 4" / no results.
 
 From the terminal (after Xcode is installed):
 
