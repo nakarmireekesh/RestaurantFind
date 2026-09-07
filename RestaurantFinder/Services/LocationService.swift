@@ -5,7 +5,7 @@ protocol LocationProviding {
     func currentLocation() async throws -> CLLocation
 }
 
-enum LocationError: LocalizedError {
+enum LocationError: LocalizedError, Equatable {
     case permissionDenied
     case unavailable
 

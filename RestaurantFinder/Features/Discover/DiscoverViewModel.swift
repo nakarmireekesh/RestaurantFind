@@ -12,7 +12,7 @@ final class DiscoverViewModel {
         case loading
         case loaded([RestaurantRow])
         case empty(String)
-        case failed(String)
+        case failed(message: String, isLocationPermissionDenied: Bool)
     }
 
     struct RestaurantRow {
@@ -106,7 +106,10 @@ final class DiscoverViewModel {
                 allRows = []
                 rebuildChips()
                 let message = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
-                state = .failed(message)
+                state = .failed(
+                    message: message,
+                    isLocationPermissionDenied: (error as? LocationError) == .permissionDenied
+                )
             }
         }
     }

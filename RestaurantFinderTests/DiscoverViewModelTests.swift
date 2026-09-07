@@ -33,19 +33,35 @@ final class DiscoverViewModelTests: XCTestCase {
         XCTAssertEqual(rows.map(\.restaurant.name), ["Near", "Far"])
     }
 
-    func test_search_surfacesLocationPermissionError() async {
+    func test_search_surfacesLocationPermissionErrorAndFlagsIt() async {
         let sut = makeSUT(locationError: .permissionDenied, results: [])
 
-        let message = await withState(
+        let failure = await withState(
             from: sut,
-            map: { state in
-                if case .failed(let message) = state { return message }
+            map: { state -> (String, Bool)? in
+                if case .failed(let message, let denied) = state { return (message, denied) }
                 return nil
             },
             trigger: { sut.search(query: "") }
         )
 
-        XCTAssertEqual(message, LocationError.permissionDenied.errorDescription)
+        XCTAssertEqual(failure.0, LocationError.permissionDenied.errorDescription)
+        XCTAssertTrue(failure.1, "permission-denied failures should be flagged so the UI can offer Open Settings")
+    }
+
+    func test_search_genericFailureIsNotFlaggedAsPermissionDenied() async {
+        let sut = makeSUT(locationError: .unavailable, results: [])
+
+        let denied = await withState(
+            from: sut,
+            map: { state -> Bool? in
+                if case .failed(_, let denied) = state { return denied }
+                return nil
+            },
+            trigger: { sut.search(query: "") }
+        )
+
+        XCTAssertFalse(denied)
     }
 
     func test_search_buildsChipsFromResultCategories() async {

@@ -35,11 +35,25 @@ final class DiscoverViewController: UIViewController {
 
         viewModel.onStateChange = { [weak self] state in self?.render(state) }
         viewModel.onChipsChange = { [weak self] in self?.renderChips() }
+
+        // Retry automatically when returning from Settings (e.g. after granting location).
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleForeground),
+            name: UIApplication.willEnterForegroundNotification,
+            object: nil
+        )
     }
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         viewModel.onAppear()
+    }
+
+    @objc private func handleForeground() {
+        if case .failed = viewModel.state {
+            viewModel.retry()
+        }
     }
 
     // MARK: - Setup
@@ -156,17 +170,33 @@ final class DiscoverViewController: UIViewController {
             config.secondaryText = message
             contentUnavailableConfiguration = config
 
-        case .failed(let message):
+        case .failed(let message, let isLocationPermissionDenied):
             tableView.refreshControl?.endRefreshing()
             apply(rows: [])
             var config = UIContentUnavailableConfiguration.empty()
-            config.image = UIImage(systemName: "exclamationmark.triangle")
-            config.text = "Couldn’t load restaurants"
+            config.image = UIImage(systemName: isLocationPermissionDenied ? "location.slash" : "exclamationmark.triangle")
+            config.text = isLocationPermissionDenied ? "Location is off" : "Couldn’t load restaurants"
             config.secondaryText = message
-            var button = UIButton.Configuration.borderedProminent()
-            button.title = "Try Again"
-            config.button = button
-            config.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.viewModel.retry() }
+
+            if isLocationPermissionDenied {
+                var openSettings = UIButton.Configuration.borderedProminent()
+                openSettings.title = "Open Settings"
+                config.button = openSettings
+                config.buttonProperties.primaryAction = UIAction { _ in
+                    guard let url = URL(string: UIApplication.openSettingsURLString) else { return }
+                    UIApplication.shared.open(url)
+                }
+
+                var retry = UIButton.Configuration.plain()
+                retry.title = "Try Again"
+                config.secondaryButton = retry
+                config.secondaryButtonProperties.primaryAction = UIAction { [weak self] _ in self?.viewModel.retry() }
+            } else {
+                var retry = UIButton.Configuration.borderedProminent()
+                retry.title = "Try Again"
+                config.button = retry
+                config.buttonProperties.primaryAction = UIAction { [weak self] _ in self?.viewModel.retry() }
+            }
             contentUnavailableConfiguration = config
         }
     }
